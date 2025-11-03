@@ -235,32 +235,32 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
             }
 
             Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-                try {
-                    sender.sendMessage(PREFIX.append(text("Starting push to repository...", GRAY)));
-                    final long start = System.currentTimeMillis();
+                sender.sendMessage(PREFIX.append(text("Starting push to repository...", GRAY)));
+                final long start = System.currentTimeMillis();
 
-                    final var repository = getConfig().getString("repository");
+                final var repository = getConfig().getString("repository");
 
-                    if (repository == null) {
-                        sender.sendMessage(PREFIX.append(text("Missing repository in config!", RED)));
-                        return;
-                    }
+                if (repository == null) {
+                    sender.sendMessage(PREFIX.append(text("Missing repository in config!", RED)));
+                    return;
+                }
 
-                    final var token = getConfig().getString("token");
+                final var token = getConfig().getString("token");
 
-                    if (token == null) {
-                        sender.sendMessage(PREFIX.append(text("Missing token in config!", RED)));
-                        return;
-                    }
+                if (token == null) {
+                    sender.sendMessage(PREFIX.append(text("Missing token in config!", RED)));
+                    return;
+                }
 
-                    final File root = getDataFolder().getAbsoluteFile().getParentFile();
-                    try (final var paths = Files.walk(root.toPath())) {
+                final File root = getDataFolder().getAbsoluteFile().getParentFile();
+                try (final var paths = Files.walk(root.toPath())) {
 
-                        for (final var p : paths.filter(Files::isRegularFile).toList()) {
+                    paths.filter(Files::isRegularFile).forEach(p -> {
+                        try {
                             final String relative = root.toPath().relativize(p).toString().replace('\\', '/');
 
                             if (isBlacklisted(relative) || !isWhitelisted(relative)) {
-                                continue;
+                                return;
                             }
 
                             final byte[] localBytes = Files.readAllBytes(p);
@@ -303,7 +303,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                             }
 
                             if (!changed) {
-                                continue;
+                                return;
                             }
 
                             // Prepare payload
@@ -331,18 +331,18 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                             } else {
                                 sender.sendMessage(PREFIX.append(text("Failed to upload ", GRAY).append(text(relative, RED))));
                             }
+                        } catch (final IOException | URISyntaxException | InterruptedException | NoSuchAlgorithmException e) {
+                            sender.sendMessage(PREFIX.append(text("Failed to process file!", RED)));
+                            getLogger().log(Level.SEVERE, "Failed to process file!", e);
                         }
-                    } catch (final SecurityException | IOException e) {
-                        sender.sendMessage(PREFIX.append(text("Failed to read local files!", RED)));
-                        getLogger().log(Level.SEVERE, "Failed to read local files!", e);
-                        return;
-                    }
-
-                    sender.sendMessage(PREFIX.append(text("Finished push in ", GRAY)).append(text((System.currentTimeMillis() - start) + " ms", GREEN)));
-                } catch (final InterruptedException | URISyntaxException | NoSuchAlgorithmException e) {
-                    sender.sendMessage(PREFIX.append(text("Something went wrong during push!", RED)));
-                    getLogger().log(Level.SEVERE, "Something went wrong during push", e);
+                    });
+                } catch (final SecurityException | IOException e) {
+                    sender.sendMessage(PREFIX.append(text("Failed to read local files!", RED)));
+                    getLogger().log(Level.SEVERE, "Failed to read local files!", e);
+                    return;
                 }
+
+                sender.sendMessage(PREFIX.append(text("Finished push in ", GRAY)).append(text((System.currentTimeMillis() - start) + " ms", GREEN)));
             });
 
             return true;
