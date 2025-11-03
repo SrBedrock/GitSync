@@ -265,7 +265,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
 
                             final byte[] localBytes = Files.readAllBytes(p);
                             final String localBase64 = Base64.getEncoder().encodeToString(localBytes);
-                            final byte[] localHash = getFileHash(p.toFile());
+                            final byte[] localHash = MessageDigest.getInstance("MD5").digest(localBytes);
 
                             // GET remote file to obtain sha and remote content
                             final String encodedPath = encodePath(relative);
