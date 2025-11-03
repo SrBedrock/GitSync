@@ -154,6 +154,10 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
         return false;
     }
 
+    /**
+     * Pull files from the configured GitHub repository.
+     * @param sender The command sender to notify about progress and errors.
+     */
     private void pull(final CommandSender sender) {
         Bukkit.getAsyncScheduler().runNow(this, task -> {
             try {
@@ -260,6 +264,10 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
         });
     }
 
+    /**
+     * Push local files to the configured GitHub repository.
+     * @param sender The command sender to notify about progress and errors.
+     */
     private void push(final CommandSender sender) {
         Bukkit.getAsyncScheduler().runNow(this, task -> {
             sender.sendMessage(PREFIX.append(text("Starting push to repository...", GRAY)));
@@ -332,14 +340,18 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                             final String body = getRes.body();
                             try {
                                 final JsonObject json = GSON.fromJson(body, JsonObject.class);
-                                if (json.has("sha")) {
-                                    remoteSha = json.get("sha").getAsString();
-                                }
-                                if (json.has("content")) {
-                                    String contentEncoded = json.get("content").getAsString();
-                                    // Remove newlines from base64 content
-                                    contentEncoded = contentEncoded.replace("\n", "").replace("\r", "");
-                                    remoteBytes = Base64.getDecoder().decode(contentEncoded);
+                                if (json != null) {
+                                    if (json.has("sha")) {
+                                        remoteSha = json.get("sha").getAsString();
+                                    }
+                                    if (json.has("content")) {
+                                        String contentEncoded = json.get("content").getAsString();
+                                        // Remove newlines from base64 content
+                                        contentEncoded = contentEncoded.replace("\n", "").replace("\r", "");
+                                        remoteBytes = Base64.getDecoder().decode(contentEncoded);
+                                    }
+                                } else {
+                                    getLogger().log(Level.WARNING, "Received null JSON when parsing response for " + relative);
                                 }
                             } catch (final Exception e) {
                                 getLogger().log(Level.WARNING, "Failed to parse JSON response for " + relative, e);
