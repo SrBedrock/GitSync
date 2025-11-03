@@ -274,11 +274,11 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                             final long fileSize = Files.size(p);
                             if (fileSize > MAX_FILE_SIZE) {
                                 sender.sendMessage(
-                                    PREFIX.append(
-                                        text("Skipping ", GRAY)
-                                            .append(text(relative, YELLOW))
-                                            .append(text(" (exceeds GitHub's 100MB limit: " + (fileSize / 1024 / 1024) + "MB)", YELLOW))
-                                    )
+                                        PREFIX.append(
+                                                text("Skipping ", GRAY)
+                                                        .append(text(relative, YELLOW))
+                                                        .append(text(" (exceeds GitHub's 100MB limit: " + (fileSize / 1024 / 1024) + "MB)", YELLOW))
+                                        )
                                 );
                                 getLogger().warning("File " + relative + " exceeds GitHub's 100MB limit (" + (fileSize / 1024 / 1024) + "MB) and was skipped.");
                                 return;
@@ -314,7 +314,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                                         contentEncoded = contentEncoded.replace("\n", "").replace("\r", "");
                                         remoteBytes = Base64.getDecoder().decode(contentEncoded);
                                     }
-                                } catch (Exception e) {
+                                } catch (final Exception e) {
                                     getLogger().log(Level.WARNING, "Failed to parse JSON response for " + relative, e);
                                 }
                             }
