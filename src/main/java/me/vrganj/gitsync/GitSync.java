@@ -290,8 +290,8 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                                 if (contentMatcher.find()) {
                                     String contentEncoded = contentMatcher.group(1);
                                     // remove JSON escaped newlines
-                                    contentEncoded = contentEncoded.replaceAll("\\\\n", "");
-                                    contentEncoded = contentEncoded.replaceAll("\\\\r", "");
+                                    contentEncoded = contentEncoded.replace("\n", "");
+                                    contentEncoded = contentEncoded.replace("\r", "");
                                     remoteBytes = Base64.getDecoder().decode(contentEncoded);
                                 }
                             }
