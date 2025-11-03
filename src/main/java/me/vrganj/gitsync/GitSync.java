@@ -9,7 +9,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -46,12 +46,14 @@ import static net.kyori.adventure.text.format.NamedTextColor.GREEN;
 import static net.kyori.adventure.text.format.NamedTextColor.RED;
 import static net.kyori.adventure.text.format.NamedTextColor.YELLOW;
 
+@NullMarked
 public class GitSync extends JavaPlugin implements CommandExecutor {
     private static final Component PREFIX = text("[", DARK_GRAY).append(text("GitSync", DARK_GREEN)).append(text("] ", DARK_GRAY));
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
     private static final Gson GSON = new Gson();
     private static final long MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB GitHub API limit
-    private List<Pattern> whitelist, blacklist;
+    private final List<Pattern> whitelist = new ArrayList<>();
+    private final List<Pattern> blacklist = new ArrayList<>();
 
     private static Pattern parsePattern(final String pattern) {
         return Pattern.compile("^\\Q" + pattern.replace("*", "\\E.*\\Q").replace("?", "\\E.\\Q") + "\\E$");
@@ -75,9 +77,6 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
 
     private void loadConfig() {
         reloadConfig();
-
-        whitelist = new ArrayList<>();
-        blacklist = new ArrayList<>();
 
         for (final String pattern : getConfig().getStringList("whitelist")) {
             whitelist.add(parsePattern(pattern));
@@ -113,7 +112,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
     }
 
     @Override
-    public boolean onCommand(@NotNull final CommandSender sender, @NotNull final Command command, @NotNull final String label, @NotNull final String[] args) {
+    public boolean onCommand(final CommandSender sender, final Command command, final String label, final String[] args) {
         if (args.length == 0 || args[0].equalsIgnoreCase("help") || args[0].equals("?")) {
             sender.sendMessage(PREFIX.append(text("Usage: ", GRAY)).append(text("/gitsync <pull/push/reload>", GREEN)));
             return true;
@@ -255,12 +254,12 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                 }
 
                 final File root = getDataFolder().getAbsoluteFile().getParentFile();
-                
+
                 // Note: This implementation makes sequential HTTP requests for each file.
                 // For repositories with many files, this may be slow due to network latency
                 // and could hit GitHub API rate limits (5000 requests/hour for authenticated requests).
                 getLogger().info("Starting push operation. Note: Files are uploaded sequentially which may be slow for large repositories.");
-                
+
                 try (final var paths = Files.walk(root.toPath())) {
 
                     paths.filter(Files::isRegularFile).forEach(p -> {
@@ -356,15 +355,16 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                                     responseSnippet = responseSnippet.substring(0, 200) + "...";
                                 }
                                 sender.sendMessage(
-                                    PREFIX.append(
-                                        text("Failed to upload ", GRAY)
-                                            .append(text(relative, RED))
-                                            .append(text(" (HTTP " + putRes.statusCode() + ")", RED))
-                                            .append(text(": " + (responseSnippet != null ? responseSnippet : ""), DARK_GRAY))
-                                    )
+                                        PREFIX.append(
+                                                text("Failed to upload ", GRAY)
+                                                        .append(text(relative, RED))
+                                                        .append(text(" (HTTP " + putRes.statusCode() + ")", RED))
+                                                        .append(text(": " + (responseSnippet != null ? responseSnippet : ""), DARK_GRAY))
+                                        )
                                 );
                             }
-                        } catch (final IOException | URISyntaxException | InterruptedException | NoSuchAlgorithmException e) {
+                        } catch (final IOException | URISyntaxException | InterruptedException |
+                                       NoSuchAlgorithmException e) {
                             sender.sendMessage(PREFIX.append(text("Failed to process file!", RED)));
                             getLogger().log(Level.SEVERE, "Failed to process file!", e);
                         }
