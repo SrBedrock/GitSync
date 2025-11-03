@@ -365,12 +365,15 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
      * Note: This preserves escape sequences as-is rather than unescaping them.
      * 
      * @param json The JSON string to parse
-     * @param key The key to extract the value for
+     * @param key The key to extract the value for (should not contain quotes or backslashes)
      * @return The string value with escape sequences preserved, or null if not found
      */
     private static String extractJsonStringValue(final String json, final String key) {
+        // Escape special characters in the key to prevent parsing issues
+        final String escapedKey = key.replace("\\", "\\\\").replace("\"", "\\\"");
+        
         // Find the key in the JSON, ensuring it's properly bounded
-        final String searchPattern = "\"" + key + "\"";
+        final String searchPattern = "\"" + escapedKey + "\"";
         int searchStart = 0;
         while (true) {
             int keyIndex = json.indexOf(searchPattern, searchStart);
