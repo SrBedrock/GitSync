@@ -257,8 +257,9 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
 
                 // Note: This implementation makes sequential HTTP requests for each file.
                 // For repositories with many files, this may be slow due to network latency
-                // and could hit GitHub API rate limits (5000 requests/hour for authenticated requests).
-                getLogger().info("Starting push operation. Note: Files are uploaded sequentially which may be slow for large repositories.");
+                // and could hit GitHub API rate limits. The commonly cited limit is 5000 requests/hour for authenticated requests using personal access tokens,
+                // but the actual limit depends on the authentication method (e.g., GitHub Apps have different limits). You can check your current rate limit status via the GitHub API.
+                getLogger().info("Starting push operation. Note: Files are uploaded sequentially which may be slow for large repositories. Be aware that GitHub API rate limits depend on your authentication method; check your current rate limit via the API.");
 
                 try (final var paths = Files.walk(root.toPath())) {
 
