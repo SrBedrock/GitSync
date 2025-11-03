@@ -112,8 +112,8 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
             return true;
         }
 
-        if (args[0].equalsIgnoreCase("sync")) {
-            if (!sender.hasPermission("gitsync.sync")) {
+        if (args[0].equalsIgnoreCase("pull")) {
+            if (!sender.hasPermission("gitsync.pull")) {
                 sender.sendMessage(PREFIX.append(text("Insufficient permissions (gitsync.sync)", RED)));
                 return false;
             }
@@ -213,89 +213,92 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                     }
 
                     final File root = getDataFolder().getAbsoluteFile().getParentFile();
-                    final var paths = Files.walk(root.toPath())
-                            .filter(Files::isRegularFile)
-                            .collect(Collectors.toList());
+                    try (final var paths = Files.walk(root.toPath())) {
 
-                    for (final var p : paths) {
-                        final String relative = root.toPath().relativize(p).toString().replace('\\', '/');
+                        for (final var p : paths.filter(Files::isRegularFile).toList()) {
+                            final String relative = root.toPath().relativize(p).toString().replace('\\', '/');
 
-                        if (isBlacklisted(relative) || !isWhitelisted(relative)) {
-                            continue;
-                        }
-
-                        final byte[] localBytes = Files.readAllBytes(p);
-                        final String localBase64 = Base64.getEncoder().encodeToString(localBytes);
-                        final byte[] localHash = getFileHash(p.toFile());
-
-                        // GET remote file to obtain sha and remote content
-                        final String encodedPath = encodePath(relative);
-                        final var getReq = HttpRequest.newBuilder(new URI("https://api.github.com/repos/" + repository + "/contents/" + encodedPath))
-                                .header("Accept", "application/vnd.github+json")
-                                .header("Authorization", token)
-                                .GET()
-                                .build();
-
-                        String remoteSha = null;
-                        byte[] remoteBytes = null;
-
-                        final var getRes = HTTP_CLIENT.send(getReq, HttpResponse.BodyHandlers.ofString());
-
-                        if (getRes.statusCode() == 200) {
-                            final String body = getRes.body();
-                            final Matcher shaMatcher = Pattern.compile("\"sha\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
-                            if (shaMatcher.find()) {
-                                remoteSha = shaMatcher.group(1);
+                            if (isBlacklisted(relative) || !isWhitelisted(relative)) {
+                                continue;
                             }
-                            final Matcher contentMatcher = Pattern.compile("\"content\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
-                            if (contentMatcher.find()) {
-                                String contentEncoded = contentMatcher.group(1);
-                                // remove JSON escaped newlines
-                                contentEncoded = contentEncoded.replaceAll("\\\\n", "");
-                                contentEncoded = contentEncoded.replaceAll("\\\\r", "");
-                                remoteBytes = Base64.getDecoder().decode(contentEncoded);
+
+                            final byte[] localBytes = Files.readAllBytes(p);
+                            final String localBase64 = Base64.getEncoder().encodeToString(localBytes);
+                            final byte[] localHash = getFileHash(p.toFile());
+
+                            // GET remote file to obtain sha and remote content
+                            final String encodedPath = encodePath(relative);
+                            final var getReq = HttpRequest.newBuilder(new URI("https://api.github.com/repos/" + repository + "/contents/" + encodedPath))
+                                    .header("Accept", "application/vnd.github+json")
+                                    .header("Authorization", token)
+                                    .GET()
+                                    .build();
+
+                            String remoteSha = null;
+                            byte[] remoteBytes = null;
+
+                            final var getRes = HTTP_CLIENT.send(getReq, HttpResponse.BodyHandlers.ofString());
+
+                            if (getRes.statusCode() == 200) {
+                                final String body = getRes.body();
+                                final Matcher shaMatcher = Pattern.compile("\"sha\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+                                if (shaMatcher.find()) {
+                                    remoteSha = shaMatcher.group(1);
+                                }
+                                final Matcher contentMatcher = Pattern.compile("\"content\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+                                if (contentMatcher.find()) {
+                                    String contentEncoded = contentMatcher.group(1);
+                                    // remove JSON escaped newlines
+                                    contentEncoded = contentEncoded.replaceAll("\\\\n", "");
+                                    contentEncoded = contentEncoded.replaceAll("\\\\r", "");
+                                    remoteBytes = Base64.getDecoder().decode(contentEncoded);
+                                }
+                            }
+
+                            boolean changed = true;
+                            if (remoteBytes != null) {
+                                final byte[] remoteHash = MessageDigest.getInstance("MD5").digest(remoteBytes);
+                                changed = !Arrays.equals(localHash, remoteHash);
+                            }
+
+                            if (!changed) {
+                                continue;
+                            }
+
+                            // Prepare payload
+                            final String message = "Update " + relative;
+                            final StringBuilder json = new StringBuilder();
+                            json.append("{");
+                            json.append("\"message\":\"").append(escapeJson(message)).append("\",");
+                            json.append("\"content\":\"").append(localBase64).append("\"");
+                            if (remoteSha != null) {
+                                json.append(",\"sha\":\"").append(remoteSha).append("\"");
+                            }
+                            json.append("}");
+
+                            final var putReq = HttpRequest.newBuilder(new URI("https://api.github.com/repos/" + repository + "/contents/" + encodedPath))
+                                    .header("Accept", "application/vnd.github+json")
+                                    .header("Authorization", token)
+                                    .header("Content-Type", "application/json")
+                                    .PUT(HttpRequest.BodyPublishers.ofString(json.toString()))
+                                    .build();
+
+                            final var putRes = HTTP_CLIENT.send(putReq, HttpResponse.BodyHandlers.ofString());
+
+                            if (putRes.statusCode() == 201 || putRes.statusCode() == 200) {
+                                sender.sendMessage(PREFIX.append(text("Uploaded ", GRAY).append(text(relative, GREEN))));
+                            } else {
+                                sender.sendMessage(PREFIX.append(text("Failed to upload ", GRAY).append(text(relative, RED))));
                             }
                         }
-
-                        boolean changed = true;
-                        if (remoteBytes != null) {
-                            final byte[] remoteHash = MessageDigest.getInstance("MD5").digest(remoteBytes);
-                            changed = !Arrays.equals(localHash, remoteHash);
-                        }
-
-                        if (!changed) {
-                            continue;
-                        }
-
-                        // Prepare payload
-                        final String message = "Update " + relative;
-                        final StringBuilder json = new StringBuilder();
-                        json.append("{");
-                        json.append("\"message\":\"").append(escapeJson(message)).append("\",");
-                        json.append("\"content\":\"").append(localBase64).append("\"");
-                        if (remoteSha != null) {
-                            json.append(",\"sha\":\"").append(remoteSha).append("\"");
-                        }
-                        json.append("}");
-
-                        final var putReq = HttpRequest.newBuilder(new URI("https://api.github.com/repos/" + repository + "/contents/" + encodedPath))
-                                .header("Accept", "application/vnd.github+json")
-                                .header("Authorization", token)
-                                .header("Content-Type", "application/json")
-                                .PUT(HttpRequest.BodyPublishers.ofString(json.toString()))
-                                .build();
-
-                        final var putRes = HTTP_CLIENT.send(putReq, HttpResponse.BodyHandlers.ofString());
-
-                        if (putRes.statusCode() == 201 || putRes.statusCode() == 200) {
-                            sender.sendMessage(PREFIX.append(text("Uploaded ", GRAY).append(text(relative, GREEN))));
-                        } else {
-                            sender.sendMessage(PREFIX.append(text("Failed to upload ", GRAY).append(text(relative, RED))));
-                        }
+                    } catch (final SecurityException | IOException e) {
+                        sender.sendMessage(PREFIX.append(text("Failed to read local files!", RED)));
+                        e.printStackTrace();
+                        return;
                     }
 
                     sender.sendMessage(PREFIX.append(text("Finished push in ", GRAY)).append(text((System.currentTimeMillis() - start) + " ms", GREEN)));
-                } catch (final IOException | InterruptedException | URISyntaxException | NoSuchAlgorithmException e) {
+                } catch (final InterruptedException | URISyntaxException | NoSuchAlgorithmException e) {
                     sender.sendMessage(PREFIX.append(text("Something went wrong during push!", RED)));
                     e.printStackTrace();
                 }
