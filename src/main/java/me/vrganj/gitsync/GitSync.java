@@ -280,17 +280,12 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
 
                             if (getRes.statusCode() == 200) {
                                 final String body = getRes.body();
-                                final Matcher shaMatcher = Pattern.compile("\"sha\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
-                                if (shaMatcher.find()) {
-                                    remoteSha = shaMatcher.group(1);
-                                }
-                                final Matcher contentMatcher = Pattern.compile("\"content\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
-                                if (contentMatcher.find()) {
-                                    String contentEncoded = contentMatcher.group(1);
+                                remoteSha = extractJsonStringValue(body, "sha");
+                                final String contentEncoded = extractJsonStringValue(body, "content");
+                                if (contentEncoded != null) {
                                     // remove JSON escaped newlines
-                                    contentEncoded = contentEncoded.replaceAll("\\\\n", "");
-                                    contentEncoded = contentEncoded.replaceAll("\\\\r", "");
-                                    remoteBytes = Base64.getDecoder().decode(contentEncoded);
+                                    final String cleanContent = contentEncoded.replaceAll("\\\\n", "").replaceAll("\\\\r", "");
+                                    remoteBytes = Base64.getDecoder().decode(cleanContent);
                                 }
                             }
 
@@ -362,6 +357,66 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
 
     private static String escapeJson(final String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /**
+     * Extracts a JSON string value for the given key, properly handling escaped quotes.
+     * This is a simple parser that handles escaped characters within JSON strings.
+     * 
+     * @param json The JSON string to parse
+     * @param key The key to extract the value for
+     * @return The unescaped string value, or null if not found
+     */
+    private static String extractJsonStringValue(final String json, final String key) {
+        // Find the key in the JSON
+        final String searchPattern = "\"" + key + "\"";
+        int keyIndex = json.indexOf(searchPattern);
+        if (keyIndex == -1) {
+            return null;
+        }
+        
+        // Find the colon after the key
+        int colonIndex = json.indexOf(':', keyIndex + searchPattern.length());
+        if (colonIndex == -1) {
+            return null;
+        }
+        
+        // Find the opening quote of the value
+        int valueStartQuote = json.indexOf('"', colonIndex);
+        if (valueStartQuote == -1) {
+            return null;
+        }
+        
+        // Find the closing quote, handling escaped quotes
+        final StringBuilder value = new StringBuilder();
+        int i = valueStartQuote + 1;
+        while (i < json.length()) {
+            char c = json.charAt(i);
+            if (c == '\\' && i + 1 < json.length()) {
+                // Handle escape sequences
+                char next = json.charAt(i + 1);
+                if (next == '"' || next == '\\' || next == '/' || next == 'b' || next == 'f' || next == 'n' || next == 'r' || next == 't') {
+                    value.append(c).append(next);
+                    i += 2;
+                } else if (next == 'u' && i + 5 < json.length()) {
+                    // Unicode escape sequence
+                    value.append(c).append(next);
+                    value.append(json.substring(i + 2, i + 6));
+                    i += 6;
+                } else {
+                    value.append(c);
+                    i++;
+                }
+            } else if (c == '"') {
+                // Found the closing quote
+                return value.toString();
+            } else {
+                value.append(c);
+                i++;
+            }
+        }
+        
+        return null;
     }
 
     private static String encodePath(final String p) {
