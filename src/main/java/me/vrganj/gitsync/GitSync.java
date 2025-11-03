@@ -329,8 +329,18 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                             if (putRes.statusCode() == 201 || putRes.statusCode() == 200) {
                                 sender.sendMessage(PREFIX.append(text("Uploaded ", GRAY).append(text(relative, GREEN))));
                             } else {
-                                sender.sendMessage(PREFIX.append(text("Failed to upload ", GRAY).append(text(relative, RED))));
-                            }
+                                String responseSnippet = putRes.body();
+                                if (responseSnippet != null && responseSnippet.length() > 200) {
+                                    responseSnippet = responseSnippet.substring(0, 200) + "...";
+                                }
+                                sender.sendMessage(
+                                    PREFIX.append(
+                                        text("Failed to upload ", GRAY)
+                                            .append(text(relative, RED))
+                                            .append(text(" (HTTP " + putRes.statusCode() + ")", RED))
+                                            .append(text(": " + (responseSnippet != null ? responseSnippet : ""), DARK_GRAY))
+                                    )
+                                );
                         } catch (final IOException | URISyntaxException | InterruptedException | NoSuchAlgorithmException e) {
                             sender.sendMessage(PREFIX.append(text("Failed to process file!", RED)));
                             getLogger().log(Level.SEVERE, "Failed to process file!", e);
