@@ -1,7 +1,7 @@
 package me.vrganj.gitsync;
 
 import net.kyori.adventure.text.Component;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -11,7 +11,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -20,7 +19,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -28,6 +30,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
+import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -165,16 +168,52 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                             final var file = new File(getDataFolder().getAbsoluteFile().getParentFile(), path);
                             final byte[] oldHash = file.exists() ? getFileHash(file) : null;
 
-                            file.getParentFile().mkdirs();
-
-                            try (final var out = new FileOutputStream(file)) {
-                                stream.transferTo(out);
+                            try {
+                                Files.createDirectories(file.getParentFile().toPath());
+                            } catch (final IOException e) {
+                                sender.sendMessage(PREFIX.append(text("Failed to create parent directories for ", RED).append(text(path, RED))));
+                                getLogger().log(Level.SEVERE, "Failed to create parent directories for " + path, e);
+                                continue;
                             }
 
-                            final byte[] newHash = getFileHash(file);
+                            Path tempPath = null;
+                            try {
+                                // create a temp file in the same directory to ensure same filesystem
+                                tempPath = Files.createTempFile(file.getParentFile().toPath(), "gitsync-", ".tmp");
 
-                            if (!Arrays.equals(oldHash, newHash)) {
-                                sender.sendMessage(PREFIX.append(text("Overwriting ", GRAY).append(text(path, GREEN))));
+                                try (final var out = Files.newOutputStream(tempPath)) {
+                                    stream.transferTo(out);
+                                }
+
+                                // compute hash from the temp file
+                                final byte[] newHash = getFileHash(tempPath.toFile());
+
+                                // if the file changed (or didn't exist), move the temp into place
+                                if (!Arrays.equals(oldHash, newHash)) {
+                                    try {
+                                        // try atomic move first
+                                        Files.move(tempPath, file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                                    } catch (final AtomicMoveNotSupportedException atomicEx) {
+                                        // fallback to non-atomic replace
+                                        Files.move(tempPath, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                                    }
+
+                                    sender.sendMessage(PREFIX.append(text("Overwriting ", GRAY).append(text(path, GREEN))));
+
+                                    // set to null so final cleanup doesn't try to delete it
+                                    tempPath = null;
+                                }
+                            } catch (final IOException e) {
+                                sender.sendMessage(PREFIX.append(text("Failed to write file ", RED).append(text(path, RED))));
+                                getLogger().log(Level.SEVERE, "Failed to write file " + path, e);
+                            } finally {
+                                // cleanup leftover temp file if it still exists
+                                if (tempPath != null) {
+                                    try {
+                                        Files.deleteIfExists(tempPath);
+                                    } catch (final IOException ignored) {
+                                    }
+                                }
                             }
                         }
                     }
@@ -182,7 +221,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                     sender.sendMessage(PREFIX.append(text("Finished sync in ", GRAY)).append(text((System.currentTimeMillis() - start) + " ms", GREEN)));
                 } catch (final IOException | InterruptedException | URISyntaxException e) {
                     sender.sendMessage(PREFIX.append(text("Something went wrong!", RED)));
-                    e.printStackTrace();
+                    getLogger().log(Level.SEVERE, "Something went wrong during pull", e);
                 }
             });
 
@@ -293,14 +332,14 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                         }
                     } catch (final SecurityException | IOException e) {
                         sender.sendMessage(PREFIX.append(text("Failed to read local files!", RED)));
-                        e.printStackTrace();
+                        getLogger().log(Level.SEVERE, "Failed to read local files!", e);
                         return;
                     }
 
                     sender.sendMessage(PREFIX.append(text("Finished push in ", GRAY)).append(text((System.currentTimeMillis() - start) + " ms", GREEN)));
                 } catch (final InterruptedException | URISyntaxException | NoSuchAlgorithmException e) {
                     sender.sendMessage(PREFIX.append(text("Something went wrong during push!", RED)));
-                    e.printStackTrace();
+                    getLogger().log(Level.SEVERE, "Something went wrong during push", e);
                 }
             });
 
