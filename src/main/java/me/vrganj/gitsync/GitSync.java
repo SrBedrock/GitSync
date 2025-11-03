@@ -362,61 +362,87 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
     /**
      * Extracts a JSON string value for the given key, properly handling escaped quotes.
      * This is a simple parser that handles escaped characters within JSON strings.
+     * Note: This preserves escape sequences as-is rather than unescaping them.
      * 
      * @param json The JSON string to parse
      * @param key The key to extract the value for
-     * @return The unescaped string value, or null if not found
+     * @return The string value with escape sequences preserved, or null if not found
      */
     private static String extractJsonStringValue(final String json, final String key) {
-        // Find the key in the JSON
+        // Find the key in the JSON, ensuring it's properly bounded
         final String searchPattern = "\"" + key + "\"";
-        int keyIndex = json.indexOf(searchPattern);
-        if (keyIndex == -1) {
-            return null;
-        }
-        
-        // Find the colon after the key
-        int colonIndex = json.indexOf(':', keyIndex + searchPattern.length());
-        if (colonIndex == -1) {
-            return null;
-        }
-        
-        // Find the opening quote of the value
-        int valueStartQuote = json.indexOf('"', colonIndex);
-        if (valueStartQuote == -1) {
-            return null;
-        }
-        
-        // Find the closing quote, handling escaped quotes
-        final StringBuilder value = new StringBuilder();
-        int i = valueStartQuote + 1;
-        while (i < json.length()) {
-            char c = json.charAt(i);
-            if (c == '\\' && i + 1 < json.length()) {
-                // Handle escape sequences
-                char next = json.charAt(i + 1);
-                if (next == '"' || next == '\\' || next == '/' || next == 'b' || next == 'f' || next == 'n' || next == 'r' || next == 't') {
-                    value.append(c).append(next);
-                    i += 2;
-                } else if (next == 'u' && i + 5 < json.length()) {
-                    // Unicode escape sequence
-                    value.append(c).append(next);
-                    value.append(json.substring(i + 2, i + 6));
-                    i += 6;
+        int searchStart = 0;
+        while (true) {
+            int keyIndex = json.indexOf(searchPattern, searchStart);
+            if (keyIndex == -1) {
+                return null;
+            }
+            
+            // Check if this is a properly bounded key (preceded by { or , and optional whitespace)
+            if (keyIndex > 0) {
+                int precedingNonWhitespace = keyIndex - 1;
+                while (precedingNonWhitespace >= 0 && Character.isWhitespace(json.charAt(precedingNonWhitespace))) {
+                    precedingNonWhitespace--;
+                }
+                if (precedingNonWhitespace >= 0) {
+                    char precedingChar = json.charAt(precedingNonWhitespace);
+                    if (precedingChar != '{' && precedingChar != ',') {
+                        // Not a properly bounded key, continue searching
+                        searchStart = keyIndex + 1;
+                        continue;
+                    }
+                }
+            }
+            
+            // Find the colon after the key
+            int colonIndex = json.indexOf(':', keyIndex + searchPattern.length());
+            if (colonIndex == -1) {
+                return null;
+            }
+            
+            // Find the opening quote of the value
+            int valueStartQuote = json.indexOf('"', colonIndex);
+            if (valueStartQuote == -1) {
+                return null;
+            }
+            
+            // Find the closing quote, handling escaped quotes
+            final StringBuilder value = new StringBuilder();
+            int i = valueStartQuote + 1;
+            while (i < json.length()) {
+                char c = json.charAt(i);
+                if (c == '\\' && i + 1 < json.length()) {
+                    // Handle escape sequences
+                    char next = json.charAt(i + 1);
+                    if (next == '"' || next == '\\' || next == '/' || next == 'b' || next == 'f' || next == 'n' || next == 'r' || next == 't') {
+                        value.append(c).append(next);
+                        i += 2;
+                    } else if (next == 'u' && i + 6 <= json.length()) {
+                        // Unicode escape sequence - validate hex digits
+                        final String hexDigits = json.substring(i + 2, i + 6);
+                        if (hexDigits.matches("[0-9a-fA-F]{4}")) {
+                            value.append(c).append(next).append(hexDigits);
+                            i += 6;
+                        } else {
+                            // Invalid unicode escape, treat backslash as regular character
+                            value.append(c);
+                            i++;
+                        }
+                    } else {
+                        value.append(c);
+                        i++;
+                    }
+                } else if (c == '"') {
+                    // Found the closing quote
+                    return value.toString();
                 } else {
                     value.append(c);
                     i++;
                 }
-            } else if (c == '"') {
-                // Found the closing quote
-                return value.toString();
-            } else {
-                value.append(c);
-                i++;
             }
+            
+            return null;
         }
-        
-        return null;
     }
 
     private static String encodePath(final String p) {
