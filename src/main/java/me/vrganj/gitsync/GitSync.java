@@ -154,6 +154,10 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
         return false;
     }
 
+    /**
+     * Pull files from the configured GitHub repository.
+     * @param sender The command sender to notify about progress and errors.
+     */
     private void pull(final CommandSender sender) {
         Bukkit.getAsyncScheduler().runNow(this, task -> {
             try {
@@ -260,6 +264,10 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
         });
     }
 
+    /**
+     * Push local files to the configured GitHub repository.
+     * @param sender The command sender to notify about progress and errors.
+     */
     private void push(final CommandSender sender) {
         Bukkit.getAsyncScheduler().runNow(this, task -> {
             sender.sendMessage(PREFIX.append(text("Starting push to repository...", GRAY)));
