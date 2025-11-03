@@ -111,7 +111,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
     @Override
     public boolean onCommand(@NotNull final CommandSender sender, @NotNull final Command command, @NotNull final String label, @NotNull final String[] args) {
         if (args.length == 0 || args[0].equalsIgnoreCase("help") || args[0].equals("?")) {
-            sender.sendMessage(PREFIX.append(text("Usage: ", GRAY)).append(text("/gitsync <sync/push/reload>", GREEN)));
+            sender.sendMessage(PREFIX.append(text("Usage: ", GRAY)).append(text("/gitsync <pull/push/reload>", GREEN)));
             return true;
         }
 
