@@ -111,7 +111,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
     @Override
     public boolean onCommand(@NotNull final CommandSender sender, @NotNull final Command command, @NotNull final String label, @NotNull final String[] args) {
         if (args.length == 0 || args[0].equalsIgnoreCase("help") || args[0].equals("?")) {
-            sender.sendMessage(PREFIX.append(text("Usage: ", GRAY)).append(text("/gitsync <sync/push/reload>", GREEN)));
+            sender.sendMessage(PREFIX.append(text("Usage: ", GRAY)).append(text("/gitsync <pull/push/reload>", GREEN)));
             return true;
         }
 
@@ -153,65 +153,65 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                         return;
                     }
 
-                    final var stream = new ZipInputStream(res.body());
+                    try (final var stream = new ZipInputStream(res.body())) {
+                        ZipEntry entry;
 
-                    ZipEntry entry;
-
-                    while ((entry = stream.getNextEntry()) != null) {
-                        if (entry.isDirectory()) {
-                            continue;
-                        }
-
-                        final var path = StringUtils.substringAfter(entry.getName(), "/");
-
-                        if (!isBlacklisted(path) && isWhitelisted(path)) {
-                            final var file = new File(getDataFolder().getAbsoluteFile().getParentFile(), path);
-                            final byte[] oldHash = file.exists() ? getFileHash(file) : null;
-
-                            try {
-                                Files.createDirectories(file.getParentFile().toPath());
-                            } catch (final IOException e) {
-                                sender.sendMessage(PREFIX.append(text("Failed to create parent directories for ", RED).append(text(path, RED))));
-                                getLogger().log(Level.SEVERE, "Failed to create parent directories for " + path, e);
+                        while ((entry = stream.getNextEntry()) != null) {
+                            if (entry.isDirectory()) {
                                 continue;
                             }
 
-                            Path tempPath = null;
-                            try {
-                                // create a temp file in the same directory to ensure same filesystem
-                                tempPath = Files.createTempFile(file.getParentFile().toPath(), "gitsync-", ".tmp");
+                            final var path = StringUtils.substringAfter(entry.getName(), "/");
 
-                                try (final var out = Files.newOutputStream(tempPath)) {
-                                    stream.transferTo(out);
+                            if (!isBlacklisted(path) && isWhitelisted(path)) {
+                                final var file = new File(getDataFolder().getAbsoluteFile().getParentFile(), path);
+                                final byte[] oldHash = file.exists() ? getFileHash(file) : null;
+
+                                try {
+                                    Files.createDirectories(file.getParentFile().toPath());
+                                } catch (final IOException e) {
+                                    sender.sendMessage(PREFIX.append(text("Failed to create parent directories for ", RED).append(text(path, RED))));
+                                    getLogger().log(Level.SEVERE, "Failed to create parent directories for " + path, e);
+                                    continue;
                                 }
 
-                                // compute hash from the temp file
-                                final byte[] newHash = getFileHash(tempPath.toFile());
+                                Path tempPath = null;
+                                try {
+                                    // create a temp file in the same directory to ensure same filesystem
+                                    tempPath = Files.createTempFile(file.getParentFile().toPath(), "gitsync-", ".tmp");
 
-                                // if the file changed (or didn't exist), move the temp into place
-                                if (!Arrays.equals(oldHash, newHash)) {
-                                    try {
-                                        // try atomic move first
-                                        Files.move(tempPath, file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-                                    } catch (final AtomicMoveNotSupportedException atomicEx) {
-                                        // fallback to non-atomic replace
-                                        Files.move(tempPath, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                                    try (final var out = Files.newOutputStream(tempPath)) {
+                                        stream.transferTo(out);
                                     }
 
-                                    sender.sendMessage(PREFIX.append(text("Overwriting ", GRAY).append(text(path, GREEN))));
+                                    // compute hash from the temp file
+                                    final byte[] newHash = getFileHash(tempPath.toFile());
 
-                                    // set to null so final cleanup doesn't try to delete it
-                                    tempPath = null;
-                                }
-                            } catch (final IOException e) {
-                                sender.sendMessage(PREFIX.append(text("Failed to write file ", RED).append(text(path, RED))));
-                                getLogger().log(Level.SEVERE, "Failed to write file " + path, e);
-                            } finally {
-                                // cleanup leftover temp file if it still exists
-                                if (tempPath != null) {
-                                    try {
-                                        Files.deleteIfExists(tempPath);
-                                    } catch (final IOException ignored) {
+                                    // if the file changed (or didn't exist), move the temp into place
+                                    if (!Arrays.equals(oldHash, newHash)) {
+                                        try {
+                                            // try atomic move first
+                                            Files.move(tempPath, file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                                        } catch (final AtomicMoveNotSupportedException atomicEx) {
+                                            // fallback to non-atomic replace
+                                            Files.move(tempPath, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                                        }
+
+                                        sender.sendMessage(PREFIX.append(text("Overwriting ", GRAY).append(text(path, GREEN))));
+
+                                        // set to null so final cleanup doesn't try to delete it
+                                        tempPath = null;
+                                    }
+                                } catch (final IOException e) {
+                                    sender.sendMessage(PREFIX.append(text("Failed to write file ", RED).append(text(path, RED))));
+                                    getLogger().log(Level.SEVERE, "Failed to write file " + path, e);
+                                } finally {
+                                    // cleanup leftover temp file if it still exists
+                                    if (tempPath != null) {
+                                        try {
+                                            Files.deleteIfExists(tempPath);
+                                        } catch (final IOException ignored) {
+                                        }
                                     }
                                 }
                             }
@@ -356,7 +356,41 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
     }
 
     private static String escapeJson(final String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':
+                    sb.append("\\\"");
+                    break;
+                case '\\':
+                    sb.append("\\\\");
+                    break;
+                case '\b':
+                    sb.append("\\b");
+                    break;
+                case '\f':
+                    sb.append("\\f");
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                    break;
+            }
+        }
+        return sb.toString();
     }
 
     /**
