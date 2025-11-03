@@ -47,6 +47,8 @@ import static net.kyori.adventure.text.format.NamedTextColor.RED;
 public class GitSync extends JavaPlugin implements CommandExecutor {
     private static final Component PREFIX = text("[", DARK_GRAY).append(text("GitSync", DARK_GREEN)).append(text("] ", DARK_GRAY));
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
+    private static final Pattern SHA_PATTERN = Pattern.compile("\"sha\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern CONTENT_PATTERN = Pattern.compile("\"content\"\\s*:\\s*\"([^\"]+)\"");
     private List<Pattern> whitelist, blacklist;
 
     private static Pattern parsePattern(final String pattern) {
@@ -280,11 +282,11 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
 
                             if (getRes.statusCode() == 200) {
                                 final String body = getRes.body();
-                                final Matcher shaMatcher = Pattern.compile("\"sha\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+                                final Matcher shaMatcher = SHA_PATTERN.matcher(body);
                                 if (shaMatcher.find()) {
                                     remoteSha = shaMatcher.group(1);
                                 }
-                                final Matcher contentMatcher = Pattern.compile("\"content\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+                                final Matcher contentMatcher = CONTENT_PATTERN.matcher(body);
                                 if (contentMatcher.find()) {
                                     String contentEncoded = contentMatcher.group(1);
                                     // remove JSON escaped newlines
