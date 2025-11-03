@@ -1,5 +1,7 @@
 package me.vrganj.gitsync;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import net.kyori.adventure.text.Component;
 import org.apache.commons.lang3.StringUtils;
 import org.bukkit.Bukkit;
@@ -31,7 +33,6 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.logging.Level;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
@@ -43,12 +44,13 @@ import static net.kyori.adventure.text.format.NamedTextColor.DARK_GREEN;
 import static net.kyori.adventure.text.format.NamedTextColor.GRAY;
 import static net.kyori.adventure.text.format.NamedTextColor.GREEN;
 import static net.kyori.adventure.text.format.NamedTextColor.RED;
+import static net.kyori.adventure.text.format.NamedTextColor.YELLOW;
 
 public class GitSync extends JavaPlugin implements CommandExecutor {
     private static final Component PREFIX = text("[", DARK_GRAY).append(text("GitSync", DARK_GREEN)).append(text("] ", DARK_GRAY));
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
-    private static final Pattern SHA_PATTERN = Pattern.compile("\"sha\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern CONTENT_PATTERN = Pattern.compile("\"content\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Gson GSON = new Gson();
+    private static final long MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB GitHub API limit
     private List<Pattern> whitelist, blacklist;
 
     private static Pattern parsePattern(final String pattern) {
@@ -253,6 +255,12 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                 }
 
                 final File root = getDataFolder().getAbsoluteFile().getParentFile();
+                
+                // Note: This implementation makes sequential HTTP requests for each file.
+                // For repositories with many files, this may be slow due to network latency
+                // and could hit GitHub API rate limits (5000 requests/hour for authenticated requests).
+                getLogger().info("Starting push operation. Note: Files are uploaded sequentially which may be slow for large repositories.");
+                
                 try (final var paths = Files.walk(root.toPath())) {
 
                     paths.filter(Files::isRegularFile).forEach(p -> {
@@ -260,6 +268,20 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                             final String relative = root.toPath().relativize(p).toString().replace('\\', '/');
 
                             if (isBlacklisted(relative) || !isWhitelisted(relative)) {
+                                return;
+                            }
+
+                            // Check file size before reading (GitHub API has 100MB limit)
+                            final long fileSize = Files.size(p);
+                            if (fileSize > MAX_FILE_SIZE) {
+                                sender.sendMessage(
+                                    PREFIX.append(
+                                        text("Skipping ", GRAY)
+                                            .append(text(relative, YELLOW))
+                                            .append(text(" (exceeds GitHub's 100MB limit: " + (fileSize / 1024 / 1024) + "MB)", YELLOW))
+                                    )
+                                );
+                                getLogger().warning("File " + relative + " exceeds GitHub's 100MB limit (" + (fileSize / 1024 / 1024) + "MB) and was skipped.");
                                 return;
                             }
 
@@ -282,17 +304,19 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
 
                             if (getRes.statusCode() == 200) {
                                 final String body = getRes.body();
-                                final Matcher shaMatcher = SHA_PATTERN.matcher(body);
-                                if (shaMatcher.find()) {
-                                    remoteSha = shaMatcher.group(1);
-                                }
-                                final Matcher contentMatcher = CONTENT_PATTERN.matcher(body);
-                                if (contentMatcher.find()) {
-                                    String contentEncoded = contentMatcher.group(1);
-                                    // remove JSON escaped newlines
-                                    contentEncoded = contentEncoded.replace("\n", "");
-                                    contentEncoded = contentEncoded.replace("\r", "");
-                                    remoteBytes = Base64.getDecoder().decode(contentEncoded);
+                                try {
+                                    final JsonObject json = GSON.fromJson(body, JsonObject.class);
+                                    if (json.has("sha")) {
+                                        remoteSha = json.get("sha").getAsString();
+                                    }
+                                    if (json.has("content")) {
+                                        String contentEncoded = json.get("content").getAsString();
+                                        // Remove newlines from base64 content
+                                        contentEncoded = contentEncoded.replace("\n", "").replace("\r", "");
+                                        remoteBytes = Base64.getDecoder().decode(contentEncoded);
+                                    }
+                                } catch (Exception e) {
+                                    getLogger().log(Level.WARNING, "Failed to parse JSON response for " + relative, e);
                                 }
                             }
 
@@ -306,22 +330,20 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                                 return;
                             }
 
-                            // Prepare payload
+                            // Prepare payload using Gson
                             final String message = "Update " + relative;
-                            final StringBuilder json = new StringBuilder();
-                            json.append("{");
-                            json.append("\"message\":\"").append(escapeJson(message)).append("\",");
-                            json.append("\"content\":\"").append(localBase64).append("\"");
+                            final JsonObject payload = new JsonObject();
+                            payload.addProperty("message", message);
+                            payload.addProperty("content", localBase64);
                             if (remoteSha != null) {
-                                json.append(",\"sha\":\"").append(remoteSha).append("\"");
+                                payload.addProperty("sha", remoteSha);
                             }
-                            json.append("}");
 
                             final var putReq = HttpRequest.newBuilder(new URI("https://api.github.com/repos/" + repository + "/contents/" + encodedPath))
                                     .header("Accept", "application/vnd.github+json")
                                     .header("Authorization", token)
                                     .header("Content-Type", "application/json")
-                                    .PUT(HttpRequest.BodyPublishers.ofString(json.toString()))
+                                    .PUT(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
                                     .build();
 
                             final var putRes = HTTP_CLIENT.send(putReq, HttpResponse.BodyHandlers.ofString());
@@ -341,6 +363,7 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
                                             .append(text(": " + (responseSnippet != null ? responseSnippet : ""), DARK_GRAY))
                                     )
                                 );
+                            }
                         } catch (final IOException | URISyntaxException | InterruptedException | NoSuchAlgorithmException e) {
                             sender.sendMessage(PREFIX.append(text("Failed to process file!", RED)));
                             getLogger().log(Level.SEVERE, "Failed to process file!", e);
@@ -370,44 +393,6 @@ public class GitSync extends JavaPlugin implements CommandExecutor {
         }
 
         return false;
-    }
-
-    private static String escapeJson(final String s) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\b':
-                    sb.append("\\b");
-                    break;
-                case '\f':
-                    sb.append("\\f");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-                    break;
-            }
-        }
-        return sb.toString();
     }
 
     private static String encodePath(final String p) {
